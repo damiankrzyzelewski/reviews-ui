@@ -1,7 +1,8 @@
+import time
 import requests
 import streamlit as st
 
-# <-- TUTAJ WKLEJ SWÓJ ADRES Z CLOUD RUN
+# <-- PASTE YOUR CLOUD RUN URL HERE
 API_URL = "https://polish-reviews-api-706649204585.europe-west1.run.app/predict"
 
 st.set_page_config(
@@ -23,30 +24,53 @@ review_text = st.text_area(
 )
 
 if st.button("Predict Rating"):
-  if len(review_text.strip()) < 3:
-    st.warning("Please enter a longer review (minimum 3 characters).")
-  else:
-    with st.spinner("Analyzing review..."):
-      try:
-        resp = requests.post(API_URL, json={"text": review_text}, timeout=10)
-        if resp.status_code == 200:
-          data = resp.json()
-          rating = int(data["predicted_rating"])
-          scores = data["confidence_scores"]
+    if len(review_text.strip()) < 3:
+        st.warning("Please enter a longer review (minimum 3 characters).")
+    else:
+        # Updated spinner text to warn the user about the potential delay
+        with st.spinner("Analyzing review... (Waking up the server might take a moment)"):
+            
+            max_retries = 2
+            
+            for attempt in range(max_retries):
+                try:
+                    # Increased timeout to 30 seconds to accommodate the cold start
+                    resp = requests.post(API_URL, json={"text": review_text}, timeout=30)
+                    
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        rating = int(data["predicted_rating"])
+                        scores = data["confidence_scores"]
 
-          # Stars display
-          st.success(f"Predicted Rating: **{rating} / 5** {'⭐️' * rating}")
+                        # Stars display
+                        st.success(f"Predicted Rating: **{rating} / 5** {'⭐️' * rating}")
 
-          # Confidence / threshold probabilities chart
-          st.write("Threshold exceedance probabilities:")
-          chart_data = {
-              "Rating > 1": scores[0],
-              "Rating > 2": scores[1],
-              "Rating > 3": scores[2],
-              "Rating > 4": scores[3],
-          }
-          st.bar_chart(chart_data)
-        else:
-          st.error(f"API Error: {resp.status_code}")
-      except Exception as e:
-        st.error(f"Failed to connect to API: {e}")
+                        # Confidence / threshold probabilities chart
+                        st.write("Threshold exceedance probabilities:")
+                        chart_data = {
+                            "Rating > 1": scores[0],
+                            "Rating > 2": scores[1],
+                            "Rating > 3": scores[2],
+                            "Rating > 4": scores[3],
+                        }
+                        st.bar_chart(chart_data)
+                        
+                        # Success - break out of the retry loop
+                        break 
+                    
+                    else:
+                        st.error(f"API Error: {resp.status_code}")
+                        break # HTTP error (e.g., 500 or 404) - no point in retrying
+                        
+                except requests.exceptions.Timeout:
+                    # If it's not the last attempt, inform the user and try again
+                    if attempt < max_retries - 1:
+                        st.info("Cloud Run server is waking up from sleep. Retrying...")
+                        time.sleep(2)
+                    else:
+                        st.error("Request timed out. Please try again in a moment.")
+                
+                except Exception as e:
+                    # Other exceptions (e.g., connection issues)
+                    st.error(f"Failed to connect to API: {e}")
+                    break
